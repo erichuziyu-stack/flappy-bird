@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>笨鸟先飞 (修复版)</title>
+  <title>Flappy Bird (最终进化版)</title>
   <style>
     body {
       margin: 0;
@@ -17,12 +17,11 @@
     canvas {
       display: block;
       margin: 0 auto;
-      background-color: #70c5ce;
       width: 100%;
       height: 100vh;
     }
 
-    /* 分数显示 */
+    /* 实时分数 (游戏时显示) */
     #score {
       position: absolute;
       top: 10%;
@@ -33,23 +32,35 @@
       font-weight: bold;
       text-shadow: 2px 2px 0 #000;
       pointer-events: none;
-      z-index: 10;
+      z-index: 20;
     }
 
-    /* 游戏结束/开始提示 */
+    /* 游戏结束/开始面板 */
     #message {
       position: absolute;
-      top: 40%;
+      top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
       text-align: center;
       color: white;
-      text-shadow: 1px 1px 0 #000;
-      pointer-events: none; /* 让点击能穿透文字传给画布 */
+      text-shadow: 2px 2px 0 #000;
+      pointer-events: none;
+      z-index: 30;
+      width: 80%;
     }
     
-    h1 { margin: 0; font-size: 40px; }
-    p { font-size: 20px; }
+    h1 { margin: 0; font-size: 40px; color: #f1c40f; }
+    p { font-size: 20px; margin: 10px 0; }
+
+    /* 最高分显示 */
+    .best-score-box {
+        background: #e67e22;
+        border: 2px solid white;
+        padding: 10px;
+        border-radius: 10px;
+        margin-top: 15px;
+        display: inline-block;
+    }
   </style>
 </head>
 <body>
@@ -57,9 +68,7 @@
   <div id="score">0</div>
   
   <div id="message">
-    <h1>FLAPPY BIRD</h1>
-    <p>点击屏幕起飞</p>
-  </div>
+    </div>
 
   <canvas id="gameCanvas"></canvas>
 
@@ -67,7 +76,29 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
-    // 强制设置画布分辨率（防止模糊）
+    // --- 0. 图片素材加载 (无需下载，直接引用网络资源) ---
+    const sprite = new Image();
+    // 使用开源的 Flappy Bird 雪碧图 (包含鸟、管子、背景)
+    sprite.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/bird.png"; // 鸟
+    
+    const bgImg = new Image();
+    bgImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/background-day.png"; // 背景
+
+    const pipeNorthImg = new Image();
+    pipeNorthImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/pipe-green.png"; // 管子
+    
+    const fgImg = new Image();
+    fgImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/base.png"; // 地面
+
+    // 确保图片加载完成后再开始绘制，防止闪烁
+    let assetsLoaded = 0;
+    const totalAssets = 4;
+    function checkLoad() { assetsLoaded++; }
+    sprite.onload = checkLoad;
+    bgImg.onload = checkLoad;
+    pipeNorthImg.onload = checkLoad;
+    fgImg.onload = checkLoad;
+
     function resize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -78,14 +109,13 @@
     // --- 1. 全局变量 ---
     let frames = 0;
     let score = 0;
-    let gameSpeed = 3; // 游戏速度
+    // 🏆 读取最高分，如果没有就是0
+    let bestScore = localStorage.getItem("flappyBest") || 0;
     
-    const state = {
-        current: 0,
-        getReady: 0,
-        game: 1,
-        over: 2
-    };
+    const state = { current: 0, getReady: 0, game: 1, over: 2 };
+
+    // 初始化显示
+    updateMessageUI();
 
     // --- 2. 鸟 (Bird) ---
     const bird = {
@@ -93,189 +123,213 @@
         y: 150,
         width: 34,
         height: 24,
-        radius: 12, // 碰撞半径
+        radius: 12,
         velocity: 0,
         gravity: 0.25,
         jump: 4.6,
+        rotation: 0,
         
         draw: function() {
-            ctx.fillStyle = "#ffeb3b";
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
-            ctx.fill();
+            // 保存画布状态
+            ctx.save();
+            ctx.translate(this.x, this.y);
             
-            // 眼睛
-            ctx.fillStyle = "white";
-            ctx.beginPath();
-            ctx.arc(this.x+6, this.y-6, 6, 0, Math.PI*2);
-            ctx.fill();
-            ctx.fillStyle = "black";
-            ctx.beginPath();
-            ctx.arc(this.x+8, this.y-6, 2, 0, Math.PI*2);
-            ctx.fill();
-            
-            // 翅膀
-            ctx.fillStyle = "#f1c40f";
-            ctx.beginPath();
-            ctx.ellipse(this.x-5, this.y+2, 8, 5, 0, 0, Math.PI*2);
-            ctx.fill();
+            // 根据速度计算旋转角度 (让鸟头朝下或朝上)
+            // 限制最大旋转角度为 90度 (Math.PI/2) 和 -25度
+            if (this.velocity < 0) this.rotation = -0.4;
+            else {
+                this.rotation += 0.1;
+                this.rotation = Math.min(Math.PI/2, this.rotation);
+            }
+            // 准备界面不旋转
+            if (state.current == state.getReady) this.rotation = 0;
 
-            // 嘴巴
-            ctx.fillStyle = "orange";
-            ctx.beginPath();
-            ctx.moveTo(this.x+8, this.y+2);
-            ctx.lineTo(this.x+18, this.y+6);
-            ctx.lineTo(this.x+8, this.y+10);
-            ctx.fill();
+            ctx.rotate(this.rotation);
+            
+            // 绘制图片 (代替原来的画圆)
+            // 参数：图片, x偏移, y偏移, 宽, 高
+            if(assetsLoaded >= 1) {
+                ctx.drawImage(sprite, -this.width/2, -this.height/2, this.width, this.height);
+            } else {
+                // 如果图片没加载出来，还是画黄球做保底
+                ctx.fillStyle = "yellow";
+                ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+            }
+            
+            ctx.restore();
         },
         
         update: function() {
-            // 只有在游戏进行中才受重力
             if (state.current == state.game) {
                 this.velocity += this.gravity;
                 this.y += this.velocity;
                 
-                // 撞地板 (Ground Collision)
-                // canvas.height - fg.h 就是地板的表面
                 if (this.y + this.radius >= canvas.height - fg.h) {
                     this.y = canvas.height - fg.h - this.radius;
                     gameOver();
                 }
                 
-                // 撞天花板 (防止飞出屏幕作弊)
                 if (this.y - this.radius <= 0) {
                     this.y = this.radius;
                     this.velocity = 0;
                 }
             }
             
-            // 准备界面，鸟上下浮动
             if (state.current == state.getReady) {
                 this.y = (canvas.height / 2) - 50 + Math.cos(frames/15) * 5;
+                this.rotation = 0;
             }
         },
-        
-        flap: function() {
-            this.velocity = -this.jump;
-        },
-        
-        reset: function() {
-            this.velocity = 0;
-            this.y = canvas.height / 2;
-        }
+        flap: function() { this.velocity = -this.jump; },
+        reset: function() { this.velocity = 0; this.y = canvas.height / 2; this.rotation = 0; }
     }
 
     // --- 3. 管道 (Pipes) ---
     const pipes = {
         items: [],
-        w: 60, // 管子宽度
-        gap: 140, // 上下管子中间的缝隙（改大了一点，方便钻过去）
-        dx: 3, // 移动速度
+        w: 52, // 管子图片原本的宽度
+        h: 320, // 管子图片原本的高度
+        gap: 120, // 难度间隙
+        dx: 3,
         
         draw: function() {
             for(let i = 0; i < this.items.length; i++) {
                 let p = this.items[i];
                 
-                ctx.fillStyle = "#2ecc71";
-                ctx.strokeStyle = "#27ae60";
-                ctx.lineWidth = 3;
-                
-                // 上管子 (从 y=0 画到 y=top)
-                ctx.fillRect(p.x, 0, this.w, p.top);
-                ctx.strokeRect(p.x, 0, this.w, p.top);
-                
-                // 下管子 (从 y=bottom 画到 地板)
-                let bottomPipeY = p.top + this.gap;
-                let bottomPipeHeight = canvas.height - bottomPipeY - fg.h;
-                
-                ctx.fillRect(p.x, bottomPipeY, this.w, bottomPipeHeight);
-                ctx.strokeRect(p.x, bottomPipeY, this.w, bottomPipeHeight);
+                // 下管子 (很简单，直接画)
+                let bottomY = p.top + this.gap;
+                // 如果图片加载了，画图；否则画绿方块
+                if(assetsLoaded >= 4) {
+                     // 上管子 (需要把图片翻转！)
+                    ctx.save();
+                    ctx.translate(p.x, p.top); // 移动到上管子的底部
+                    ctx.scale(1, -1); // 👇 垂直翻转坐标系
+                    ctx.drawImage(pipeNorthImg, 0, 0, this.w, this.h); 
+                    ctx.restore(); // 恢复坐标系
+
+                    // 下管子
+                    ctx.drawImage(pipeNorthImg, p.x, bottomY, this.w, this.h);
+                } else {
+                    ctx.fillStyle = "green";
+                    ctx.fillRect(p.x, 0, this.w, p.top);
+                    ctx.fillRect(p.x, bottomY, this.w, canvas.height - bottomY);
+                }
             }
         },
         
         update: function() {
             if (state.current !== state.game) return;
             
-            // 每 120 帧生成一根新管子
             if (frames % 120 == 0) {
-                // 计算上管子的高度 (留出最小 50px 的安全距离)
                 let maxTop = canvas.height - fg.h - this.gap - 50;
                 let minTop = 50;
                 let randomTop = Math.floor(Math.random() * (maxTop - minTop + 1) + minTop);
-                
-                this.items.push({
-                    x: canvas.width,
-                    top: randomTop // 记录上管子的高度
-                });
+                this.items.push({ x: canvas.width, top: randomTop });
             }
             
             for(let i = 0; i < this.items.length; i++) {
                 let p = this.items[i];
                 p.x -= this.dx;
                 
-                // --- 💥 核心修复：碰撞检测 ---
-                // 判定逻辑：
-                // 1. 鸟的X坐标 进入了 管子的X范围
-                // 2. 鸟的Y坐标 < 上管子高度  或者  鸟的Y坐标 > 下管子开始位置
+                let hitX = bird.x + (bird.radius-4) > p.x && bird.x - (bird.radius-4) < p.x + this.w;
+                let hitY = (bird.y - (bird.radius-4) < p.top) || (bird.y + (bird.radius-4) > p.top + this.gap);
                 
-                // 为了手感更好，我们让鸟的判定体积稍微小一点 (radius - 2)
-                let hitX = bird.x + (bird.radius - 4) > p.x && bird.x - (bird.radius - 4) < p.x + this.w;
-                let hitY = (bird.y - (bird.radius - 4) < p.top) || (bird.y + (bird.radius - 4) > p.top + this.gap);
+                if (hitX && hitY) gameOver();
                 
-                if (hitX && hitY) {
-                    gameOver();
-                }
-                
-                // 加分
                 if (p.x + this.w < bird.x && !p.passed) {
                     score++;
                     p.passed = true;
                     document.getElementById("score").innerText = score;
                 }
                 
-                // 移除屏幕外的管子
-                if (p.x + this.w < 0) {
-                    this.items.shift();
-                    i--;
-                }
+                if (p.x + this.w < 0) { this.items.shift(); i--; }
             }
         },
-        
-        reset: function() {
-            this.items = [];
+        reset: function() { this.items = []; }
+    }
+
+    // --- 4. 背景与地板 ---
+    const bg = {
+        draw: function() {
+            if(assetsLoaded >= 2) {
+                // 简单的背景平铺逻辑
+                ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = "#70c5ce";
+                ctx.fillRect(0,0,canvas.width, canvas.height);
+            }
         }
     }
 
-    // --- 4. 地板 (Foreground) ---
     const fg = {
-        h: 110,
+        h: 112,
         x: 0,
         draw: function() {
-            ctx.fillStyle = "#ded895";
-            ctx.fillRect(0, canvas.height - this.h, canvas.width, this.h);
-            ctx.fillStyle = "#73bf2e";
-            ctx.fillRect(0, canvas.height - this.h, canvas.width, 15);
+            if(assetsLoaded >= 4) {
+                // 画两张地板连接，实现无缝滚动
+                // 这里的 336 是图片原本的宽度
+                let w = 336; 
+                // 计算需要画多少个地板才能填满屏幕
+                let count = Math.ceil(canvas.width / w) + 1;
+                for(let i=0; i<count; i++) {
+                    ctx.drawImage(fgImg, this.x + i * w, canvas.height - this.h, w, this.h);
+                }
+            } else {
+                ctx.fillStyle = "#ded895";
+                ctx.fillRect(0, canvas.height - this.h, canvas.width, this.h);
+            }
         },
         update: function() {
             if (state.current == state.game) {
-                // 让地板动起来
-                this.x = (this.x - gameSpeed) % 20;
+                // 这里的 336 是地板素材的宽度
+                this.x = (this.x - 2) % 336;
             }
         }
     }
 
-    // --- 5. 游戏控制 ---
+    // --- 5. 游戏控制与UI ---
     function gameOver() {
         state.current = state.over;
-        document.getElementById("message").innerHTML = "<h1>GAME OVER</h1><p>点击重新开始</p>";
-        document.getElementById("message").style.display = "block";
+        
+        // 🏆 检查并保存最高分
+        if(score > bestScore) {
+            bestScore = score;
+            localStorage.setItem("flappyBest", bestScore);
+        }
+        
+        updateMessageUI();
+    }
+
+    function updateMessageUI() {
+        const msg = document.getElementById("message");
+        if (state.current == state.getReady) {
+            msg.style.display = "block";
+            document.getElementById("score").style.display = "none";
+            msg.innerHTML = `
+                <h1>FLAPPY BIRD</h1>
+                <p>点击屏幕起飞</p>
+                <div class="best-score-box">历史最高: ${bestScore}</div>
+            `;
+        } else if (state.current == state.over) {
+            msg.style.display = "block";
+            document.getElementById("score").style.display = "block";
+            msg.innerHTML = `
+                <h1 style="color: #e74c3c">GAME OVER</h1>
+                <p>本局得分: ${score}</p>
+                <div class="best-score-box">历史最高: ${bestScore}</div>
+                <p style="font-size: 14px; margin-top: 20px; color: #eee">点击重新开始</p>
+            `;
+        } else {
+            msg.style.display = "none";
+            document.getElementById("score").style.display = "block";
+        }
     }
 
     function clickHandler() {
         switch (state.current) {
             case state.getReady:
                 state.current = state.game;
-                document.getElementById("message").style.display = "none";
+                updateMessageUI();
                 break;
             case state.game:
                 bird.flap();
@@ -286,21 +340,15 @@
                 score = 0;
                 frames = 0;
                 document.getElementById("score").innerText = score;
-                document.getElementById("message").innerHTML = "<h1>FLAPPY BIRD</h1><p>点击屏幕起飞</p>";
                 state.current = state.getReady;
-                document.getElementById("message").style.display = "block";
+                updateMessageUI();
                 break;
         }
     }
 
     window.addEventListener("click", clickHandler);
-    window.addEventListener("touchstart", (e) => {
-        e.preventDefault();
-        clickHandler();
-    }, {passive: false});
-    window.addEventListener("keydown", (e) => {
-        if(e.code === "Space") clickHandler();
-    });
+    window.addEventListener("touchstart", (e) => { e.preventDefault(); clickHandler(); }, {passive: false});
+    window.addEventListener("keydown", (e) => { if(e.code === "Space") clickHandler(); });
 
     // --- 6. 循环 ---
     function loop() {
@@ -308,9 +356,8 @@
         fg.update();
         pipes.update();
         
-        ctx.fillStyle = "#70c5ce";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+        // 绘制顺序：背景 -> 管子 -> 地板 -> 鸟
+        bg.draw();
         pipes.draw();
         fg.draw();
         bird.draw();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Flappy Bird (最终进化版)</title>
+  <title>Flappy Bird (修复版)</title>
   <style>
     body {
       margin: 0;
@@ -146,14 +146,23 @@
 
             ctx.rotate(this.rotation);
             
-            // 绘制图片 (代替原来的画圆)
-            // 参数：图片, x偏移, y偏移, 宽, 高
-            if(assetsLoaded >= 1) {
+            // --- 🛠️ 核心修复：双重保险画鸟 ---
+            // 检查1：assetsLoaded 计数器是否足够
+            // 检查2：sprite.complete 属性，确认图片真的加载完了
+            if(assetsLoaded >= 1 && sprite.complete) {
+                // 图片加载成功，画像素鸟
                 ctx.drawImage(sprite, -this.width/2, -this.height/2, this.width, this.height);
             } else {
-                // 如果图片没加载出来，还是画黄球做保底
-                ctx.fillStyle = "yellow";
-                ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+                // 图片还没加载好，画一个黄色的球做保底（应急方案）
+                ctx.fillStyle = "#ffeb3b"; // 鲜艳的黄色
+                ctx.beginPath(); 
+                ctx.arc(0, 0, this.radius, 0, Math.PI*2); 
+                ctx.fill();
+                // 画个简单的眼睛，让它看起来像只鸟
+                ctx.fillStyle = "white";
+                ctx.beginPath(); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = "black";
+                ctx.beginPath(); ctx.arc(8, -4, 1.5, 0, Math.PI*2); ctx.fill();
             }
             
             ctx.restore();
@@ -199,7 +208,7 @@
                 // 下管子 (很简单，直接画)
                 let bottomY = p.top + this.gap;
                 // 如果图片加载了，画图；否则画绿方块
-                if(assetsLoaded >= 4) {
+                if(assetsLoaded >= 4 && pipeNorthImg.complete) {
                      // 上管子 (需要把图片翻转！)
                     ctx.save();
                     ctx.translate(p.x, p.top); // 移动到上管子的底部
@@ -210,7 +219,7 @@
                     // 下管子
                     ctx.drawImage(pipeNorthImg, p.x, bottomY, this.w, this.h);
                 } else {
-                    ctx.fillStyle = "green";
+                    ctx.fillStyle = "#2ecc71";
                     ctx.fillRect(p.x, 0, this.w, p.top);
                     ctx.fillRect(p.x, bottomY, this.w, canvas.height - bottomY);
                 }
@@ -251,7 +260,7 @@
     // --- 4. 背景与地板 ---
     const bg = {
         draw: function() {
-            if(assetsLoaded >= 2) {
+            if(assetsLoaded >= 2 && bgImg.complete) {
                 // 简单的背景平铺逻辑
                 ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
             } else {
@@ -265,7 +274,7 @@
         h: 112,
         x: 0,
         draw: function() {
-            if(assetsLoaded >= 4) {
+            if(assetsLoaded >= 4 && fgImg.complete) {
                 // 画两张地板连接，实现无缝滚动
                 // 这里的 336 是图片原本的宽度
                 let w = 336; 

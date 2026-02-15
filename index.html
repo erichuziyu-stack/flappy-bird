@@ -4,10 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   
-  <meta name="apple-mobile-web-app-capable" content="yes"> <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"> <meta name="apple-mobile-web-app-title" content="Flappy Bird"> <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Flappy Bird">
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png">
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png">
 
-  <title>Flappy Bird PWA</title>
+  <title>Flappy Bird Final</title>
   <style>
     body {
       margin: 0;
@@ -16,8 +19,9 @@
       overflow: hidden;
       touch-action: none; 
       font-family: 'Courier New', Courier, monospace;
-      /* 防止 iOS 回弹效果 */
       overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     canvas {
@@ -29,7 +33,7 @@
 
     #score {
       position: absolute;
-      top: 10%; /* 稍微下移一点，避开刘海屏 */
+      top: 10%;
       left: 50%;
       transform: translateX(-50%);
       font-size: 60px;
@@ -64,10 +68,26 @@
         margin-top: 15px;
         display: inline-block;
     }
+    
+    /* 音效开关按钮 */
+    #soundBtn {
+        position: fixed;
+        top: 40px;
+        right: 20px;
+        z-index: 40;
+        background: rgba(0,0,0,0.5);
+        color: white;
+        border: 1px solid white;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 12px;
+        pointer-events: auto; /* 允许点击 */
+    }
   </style>
 </head>
 <body>
 
+  <div id="soundBtn" onclick="toggleMute()">🔇 音效: 关</div>
   <div id="score">0</div>
   
   <div id="message">
@@ -79,7 +99,76 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
-    // 资源加载
+    // --- 🔊 核心升级：音效合成器 ---
+    const audio = {
+        ctx: null,
+        isMuted: true,
+        
+        init: function() {
+            if (!this.ctx) {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.isMuted = false;
+                updateSoundUI();
+            } else if (this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        },
+        
+        play: function(type) {
+            if (this.isMuted || !this.ctx) return;
+            
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            
+            const now = this.ctx.currentTime;
+            
+            if (type === 'jump') {
+                // 起飞：短促的升调 (Square波形更有8-bit感)
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } 
+            else if (type === 'score') {
+                // 得分：清脆的高音叮
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1000, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+            else if (type === 'hit') {
+                // 撞击：低沉的锯齿波
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 0.3);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+        }
+    };
+
+    function toggleMute() {
+        audio.init(); // 尝试初始化
+        audio.isMuted = !audio.isMuted;
+        updateSoundUI();
+    }
+    
+    function updateSoundUI() {
+        const btn = document.getElementById("soundBtn");
+        btn.innerText = audio.isMuted ? "🔇 音效: 关" : "🔊 音效: 开";
+        btn.style.backgroundColor = audio.isMuted ? "rgba(0,0,0,0.5)" : "rgba(46, 204, 113, 0.8)";
+    }
+
+    // --- 资源加载 ---
     const bgImg = new Image();
     bgImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/background-day.png";
     let bgLoaded = false;
@@ -92,7 +181,7 @@
     window.addEventListener('resize', resize);
     resize();
 
-    // 变量
+    // --- 变量 ---
     let frames = 0;
     let score = 0;
     let bestScore = localStorage.getItem("flappyBest") || 0;
@@ -100,17 +189,10 @@
 
     updateMessageUI();
 
-    // 鸟 (代码绘制)
+    // --- 鸟 ---
     const bird = {
-        x: 50,
-        y: 150,
-        width: 34,
-        height: 24,
-        radius: 12,
-        velocity: 0,
-        gravity: 0.25,
-        jump: 4.6,
-        rotation: 0,
+        x: 50, y: 150, width: 34, height: 24, radius: 12,
+        velocity: 0, gravity: 0.25, jump: 4.6, rotation: 0,
         
         draw: function() {
             ctx.save();
@@ -123,26 +205,13 @@
             if (state.current == state.getReady) this.rotation = 0;
             ctx.rotate(this.rotation);
 
-            ctx.fillStyle = "#f4d03f";
-            ctx.fillRect(-17, -12, 34, 24);
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = "#000";
-            ctx.strokeRect(-17, -12, 34, 24);
-
-            ctx.fillStyle = "#fff";
-            ctx.fillRect(5, -10, 10, 10);
-            ctx.strokeRect(5, -10, 10, 10);
-            ctx.fillStyle = "#000";
-            ctx.fillRect(11, -6, 2, 2);
-
-            ctx.fillStyle = "#e67e22";
-            ctx.fillRect(5, 2, 14, 8);
-            ctx.strokeRect(5, 2, 14, 8);
-            
-            ctx.fillStyle = "#fff";
-            ctx.fillRect(-10, 2, 12, 6);
-            ctx.strokeRect(-10, 2, 12, 6);
-
+            // 像素鸟绘制
+            ctx.fillStyle = "#f4d03f"; ctx.fillRect(-17, -12, 34, 24);
+            ctx.lineWidth = 2; ctx.strokeStyle = "#000"; ctx.strokeRect(-17, -12, 34, 24);
+            ctx.fillStyle = "#fff"; ctx.fillRect(5, -10, 10, 10); ctx.strokeRect(5, -10, 10, 10);
+            ctx.fillStyle = "#000"; ctx.fillRect(11, -6, 2, 2);
+            ctx.fillStyle = "#e67e22"; ctx.fillRect(5, 2, 14, 8); ctx.strokeRect(5, 2, 14, 8);
+            ctx.fillStyle = "#fff"; ctx.fillRect(-10, 2, 12, 6); ctx.strokeRect(-10, 2, 12, 6);
             ctx.restore();
         },
         
@@ -165,35 +234,30 @@
                 this.rotation = 0;
             }
         },
-        flap: function() { this.velocity = -this.jump; },
+        flap: function() { 
+            this.velocity = -this.jump; 
+            audio.play('jump'); // 🔊 播放跳跃音效
+        },
         reset: function() { this.velocity = 0; this.y = canvas.height / 2; this.rotation = 0; }
     }
 
-    // 管道
+    // --- 管道 ---
     const pipes = {
-        items: [],
-        w: 52,
-        gap: 130,
-        dx: 3,
+        items: [], w: 52, gap: 130, dx: 3,
         
         draw: function() {
             for(let i = 0; i < this.items.length; i++) {
                 let p = this.items[i];
                 let bottomY = p.top + this.gap;
                 
-                ctx.fillStyle = "#73bf2e";
-                ctx.strokeStyle = "#558c22";
-                ctx.lineWidth = 2;
-
-                ctx.fillRect(p.x, 0, this.w, p.top);
-                ctx.strokeRect(p.x, 0, this.w, p.top);
-                ctx.fillRect(p.x - 2, p.top - 20, this.w + 4, 20);
-                ctx.strokeRect(p.x - 2, p.top - 20, this.w + 4, 20);
-
+                ctx.fillStyle = "#73bf2e"; ctx.strokeStyle = "#558c22"; ctx.lineWidth = 2;
+                // 上
+                ctx.fillRect(p.x, 0, this.w, p.top); ctx.strokeRect(p.x, 0, this.w, p.top);
+                ctx.fillRect(p.x - 2, p.top - 20, this.w + 4, 20); ctx.strokeRect(p.x - 2, p.top - 20, this.w + 4, 20);
+                // 下
                 ctx.fillRect(p.x, bottomY, this.w, canvas.height - bottomY - fg.h);
                 ctx.strokeRect(p.x, bottomY, this.w, canvas.height - bottomY - fg.h);
-                ctx.fillRect(p.x - 2, bottomY, this.w + 4, 20);
-                ctx.strokeRect(p.x - 2, bottomY, this.w + 4, 20);
+                ctx.fillRect(p.x - 2, bottomY, this.w + 4, 20); ctx.strokeRect(p.x - 2, bottomY, this.w + 4, 20);
             }
         },
         
@@ -217,6 +281,7 @@
                     score++;
                     p.passed = true;
                     document.getElementById("score").innerText = score;
+                    audio.play('score'); // 🔊 播放得分音效
                 }
                 if (p.x + this.w < 0) { this.items.shift(); i--; }
             }
@@ -224,34 +289,28 @@
         reset: function() { this.items = []; }
     }
 
-    // 地板与背景
+    // --- 背景/地板 ---
     const bg = {
         draw: function() {
             if(bgLoaded) ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
             else { ctx.fillStyle = "#70c5ce"; ctx.fillRect(0,0,canvas.width, canvas.height); }
         }
     }
-
     const fg = {
-        h: 112,
-        x: 0,
+        h: 112, x: 0,
         draw: function() {
-            ctx.fillStyle = "#ded895";
-            ctx.fillRect(0, canvas.height - this.h, canvas.width, this.h);
-            ctx.fillStyle = "#73bf2e";
-            ctx.fillRect(0, canvas.height - this.h, canvas.width, 12);
-            ctx.strokeRect(0, canvas.height - this.h, canvas.width, 12);
+            ctx.fillStyle = "#ded895"; ctx.fillRect(0, canvas.height - this.h, canvas.width, this.h);
+            ctx.fillStyle = "#73bf2e"; ctx.fillRect(0, canvas.height - this.h, canvas.width, 12); ctx.strokeRect(0, canvas.height - this.h, canvas.width, 12);
         },
         update: function() {
-            if (state.current == state.game) {
-                this.x = (this.x - 2) % 20;
-            }
+            if (state.current == state.game) { this.x = (this.x - 2) % 20; }
         }
     }
 
-    // 控制
+    // --- 控制 ---
     function gameOver() {
         state.current = state.over;
+        audio.play('hit'); // 🔊 播放撞击音效
         if(score > bestScore) {
             bestScore = score;
             localStorage.setItem("flappyBest", bestScore);
@@ -284,10 +343,19 @@
         }
     }
 
-    function clickHandler() {
+    function clickHandler(e) {
+        // 确保音频环境初始化 (必须在用户交互中调用)
+        audio.init();
+
+        // 如果点到了音效按钮，就不触发游戏逻辑
+        if (e.target.id === 'soundBtn') return;
+
         switch (state.current) {
             case state.getReady:
                 state.current = state.game;
+                // 第一次点击自动开启音效 (如果不吵的话)
+                if(audio.isMuted) { audio.isMuted = false; updateSoundUI(); }
+                audio.play('jump');
                 updateMessageUI();
                 break;
             case state.game:
@@ -306,17 +374,15 @@
     }
 
     window.addEventListener("click", clickHandler);
-    window.addEventListener("touchstart", (e) => { e.preventDefault(); clickHandler(); }, {passive: false});
-    window.addEventListener("keydown", (e) => { if(e.code === "Space") clickHandler(); });
+    window.addEventListener("touchstart", (e) => { 
+        if(e.target.id !== 'soundBtn') e.preventDefault(); 
+        clickHandler(e); 
+    }, {passive: false});
+    window.addEventListener("keydown", (e) => { if(e.code === "Space") clickHandler(e); });
 
     function loop() {
-        bird.update();
-        fg.update();
-        pipes.update();
-        bg.draw();
-        pipes.draw();
-        fg.draw();
-        bird.draw();
+        bird.update(); fg.update(); pipes.update();
+        bg.draw(); pipes.draw(); fg.draw(); bird.draw();
         frames++;
         requestAnimationFrame(loop);
     }

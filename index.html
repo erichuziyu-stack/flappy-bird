@@ -2,8 +2,12 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Flappy Bird (最终修复版)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  
+  <meta name="apple-mobile-web-app-capable" content="yes"> <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"> <meta name="apple-mobile-web-app-title" content="Flappy Bird"> <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png">
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png">
+
+  <title>Flappy Bird PWA</title>
   <style>
     body {
       margin: 0;
@@ -12,6 +16,8 @@
       overflow: hidden;
       touch-action: none; 
       font-family: 'Courier New', Courier, monospace;
+      /* 防止 iOS 回弹效果 */
+      overscroll-behavior: none;
     }
 
     canvas {
@@ -23,7 +29,7 @@
 
     #score {
       position: absolute;
-      top: 10%;
+      top: 10%; /* 稍微下移一点，避开刘海屏 */
       left: 50%;
       transform: translateX(-50%);
       font-size: 60px;
@@ -73,8 +79,7 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
 
-    // --- 0. 资源加载 (背景图保留，鸟和管子改用纯代码绘制) ---
-    // 背景图如果加载失败，会用纯色填充，不影响游戏
+    // 资源加载
     const bgImg = new Image();
     bgImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/background-day.png";
     let bgLoaded = false;
@@ -87,16 +92,15 @@
     window.addEventListener('resize', resize);
     resize();
 
-    // --- 1. 全局变量 ---
+    // 变量
     let frames = 0;
     let score = 0;
     let bestScore = localStorage.getItem("flappyBest") || 0;
-    
     const state = { current: 0, getReady: 0, game: 1, over: 2 };
 
     updateMessageUI();
 
-    // --- 2. 鸟 (Bird) - 纯代码像素画版 ---
+    // 鸟 (代码绘制)
     const bird = {
         x: 50,
         y: 150,
@@ -111,8 +115,6 @@
         draw: function() {
             ctx.save();
             ctx.translate(this.x, this.y);
-            
-            // 旋转逻辑
             if (this.velocity < 0) this.rotation = -0.4;
             else {
                 this.rotation += 0.1;
@@ -121,28 +123,22 @@
             if (state.current == state.getReady) this.rotation = 0;
             ctx.rotate(this.rotation);
 
-            // 🔥 核心修改：用代码画一只像素鸟 (不再依赖图片)
-            // 身体 (黄色)
             ctx.fillStyle = "#f4d03f";
             ctx.fillRect(-17, -12, 34, 24);
-            // 边框 (黑色) - 为了让它更像像素风
             ctx.lineWidth = 2;
             ctx.strokeStyle = "#000";
             ctx.strokeRect(-17, -12, 34, 24);
 
-            // 眼睛 (白底黑瞳)
             ctx.fillStyle = "#fff";
             ctx.fillRect(5, -10, 10, 10);
             ctx.strokeRect(5, -10, 10, 10);
             ctx.fillStyle = "#000";
-            ctx.fillRect(11, -6, 2, 2); // 瞳孔
+            ctx.fillRect(11, -6, 2, 2);
 
-            // 嘴巴 (橙色)
             ctx.fillStyle = "#e67e22";
             ctx.fillRect(5, 2, 14, 8);
             ctx.strokeRect(5, 2, 14, 8);
             
-            // 翅膀 (白色)
             ctx.fillStyle = "#fff";
             ctx.fillRect(-10, 2, 12, 6);
             ctx.strokeRect(-10, 2, 12, 6);
@@ -155,12 +151,10 @@
                 this.velocity += this.gravity;
                 this.y += this.velocity;
                 
-                // 撞地板
                 if (this.y + this.radius >= canvas.height - fg.h) {
                     this.y = canvas.height - fg.h - this.radius;
                     gameOver();
                 }
-                // 撞天花板
                 if (this.y - this.radius <= 0) {
                     this.y = this.radius;
                     this.velocity = 0;
@@ -175,11 +169,11 @@
         reset: function() { this.velocity = 0; this.y = canvas.height / 2; this.rotation = 0; }
     }
 
-    // --- 3. 管道 (Pipes) - 纯代码绘制 ---
+    // 管道
     const pipes = {
         items: [],
         w: 52,
-        gap: 130, // 间隙稍微调大一点点，手感更好
+        gap: 130,
         dx: 3,
         
         draw: function() {
@@ -187,22 +181,17 @@
                 let p = this.items[i];
                 let bottomY = p.top + this.gap;
                 
-                // 绘制管子 (经典绿色)
-                ctx.fillStyle = "#73bf2e"; // 浅绿
-                ctx.strokeStyle = "#558c22"; // 深绿边框
+                ctx.fillStyle = "#73bf2e";
+                ctx.strokeStyle = "#558c22";
                 ctx.lineWidth = 2;
 
-                // 上管子
                 ctx.fillRect(p.x, 0, this.w, p.top);
                 ctx.strokeRect(p.x, 0, this.w, p.top);
-                // 上管口 (加个盖子)
                 ctx.fillRect(p.x - 2, p.top - 20, this.w + 4, 20);
                 ctx.strokeRect(p.x - 2, p.top - 20, this.w + 4, 20);
 
-                // 下管子
                 ctx.fillRect(p.x, bottomY, this.w, canvas.height - bottomY - fg.h);
                 ctx.strokeRect(p.x, bottomY, this.w, canvas.height - bottomY - fg.h);
-                // 下管口
                 ctx.fillRect(p.x - 2, bottomY, this.w + 4, 20);
                 ctx.strokeRect(p.x - 2, bottomY, this.w + 4, 20);
             }
@@ -235,15 +224,11 @@
         reset: function() { this.items = []; }
     }
 
-    // --- 4. 背景与地板 ---
+    // 地板与背景
     const bg = {
         draw: function() {
-            if(bgLoaded) {
-                ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
-            } else {
-                ctx.fillStyle = "#70c5ce"; // 加载失败就用纯色背景
-                ctx.fillRect(0,0,canvas.width, canvas.height);
-            }
+            if(bgLoaded) ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+            else { ctx.fillStyle = "#70c5ce"; ctx.fillRect(0,0,canvas.width, canvas.height); }
         }
     }
 
@@ -251,10 +236,8 @@
         h: 112,
         x: 0,
         draw: function() {
-            // 地板 (沙土色)
             ctx.fillStyle = "#ded895";
             ctx.fillRect(0, canvas.height - this.h, canvas.width, this.h);
-            // 草皮 (亮绿色)
             ctx.fillStyle = "#73bf2e";
             ctx.fillRect(0, canvas.height - this.h, canvas.width, 12);
             ctx.strokeRect(0, canvas.height - this.h, canvas.width, 12);
@@ -266,7 +249,7 @@
         }
     }
 
-    // --- 5. 控制逻辑 ---
+    // 控制
     function gameOver() {
         state.current = state.over;
         if(score > bestScore) {
@@ -330,12 +313,10 @@
         bird.update();
         fg.update();
         pipes.update();
-        
         bg.draw();
         pipes.draw();
         fg.draw();
         bird.draw();
-        
         frames++;
         requestAnimationFrame(loop);
     }
